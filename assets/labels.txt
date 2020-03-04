@@ -1,0 +1,12 @@
+0 Black Room
+1 Blue Room
+2 Brown Room
+3 Gold Room
+4 Gray Room
+5 Green Room
+6 Orange Room
+7 Pink Room
+8 Purple Room
+9 Red Room
+10 White Room
+11 Yellow Room
