@@ -1,6 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:percent_indicator/linear_percent_indicator.dart';
 import 'package:tflite/tflite.dart';
 
 void main() => runApp(MyApp());
@@ -8,15 +10,27 @@ void main() => runApp(MyApp());
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'ML Room Colors',
+      title: 'Detect Room Color',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
       home: MyHomePage(title: 'Detect Room Color'),
     );
   }
+}
+
+class Result {
+  double confidence;
+  int id;
+  String label;
+
+  Result(this.confidence, this.id, this.label);
 }
 
 class MyHomePage extends StatefulWidget {
@@ -28,7 +42,7 @@ class MyHomePage extends StatefulWidget {
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   CameraController _camera;
 
   bool _isDetecting = false;
@@ -36,7 +50,10 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _initializeControllerFuture;
 
   bool _modelLoaded;
-  List _outputs;
+  List<Result> _outputs = List();
+
+  AnimationController _ColorAnimationController;
+  Animation _colorTween;
 
   Future<CameraDescription> _getCamera(CameraLensDirection dir) async {
     return await availableCameras().then(
@@ -50,11 +67,11 @@ class _MyHomePageState extends State<MyHomePage> {
     log("_initializeCamera", "Initializing camera..");
 
     _camera = CameraController(
-      await _getCamera(_direction),
-      defaultTargetPlatform == TargetPlatform.iOS
-          ? ResolutionPreset.low
-          : ResolutionPreset.medium,
-    );
+        await _getCamera(_direction),
+        defaultTargetPlatform == TargetPlatform.iOS
+            ? ResolutionPreset.low
+            : ResolutionPreset.high,
+        enableAudio: false);
     _initializeControllerFuture = _camera.initialize().then((value) {
       log("_initializeCamera", "Camera initialized, starting camera stream..");
 
@@ -77,11 +94,15 @@ class _MyHomePageState extends State<MyHomePage> {
     _modelLoaded = false;
 
     loadModel().then((value) {
-
       setState(() {
         _modelLoaded = true;
       });
     });
+
+    _ColorAnimationController =
+        AnimationController(vsync: this, duration: Duration(milliseconds: 500));
+    _colorTween = ColorTween(begin: Colors.green, end: Colors.red)
+        .animate(_ColorAnimationController);
   }
 
   //Load the Tflite model
@@ -95,29 +116,39 @@ class _MyHomePageState extends State<MyHomePage> {
 
   classifyImage(CameraImage image) async {
     await Tflite.runModelOnFrame(
-      bytesList: image.planes.map((plane) {
-        return plane.bytes;
-      }).toList(),
-      numResults: 3,
-      threshold: 0.3,
-      imageMean: 127.5,
-      imageStd: 127.5,
-      //asynch: true,
-    ).then((value) {
-      _isDetecting = false;
-
+            bytesList: image.planes.map((plane) {
+              return plane.bytes;
+            }).toList(),
+            numResults: 5)
+        .then((value) {
       if (value.isNotEmpty) {
         log("classifyImage", "Results loaded. ${value.length}");
+
+        _outputs.clear();
+
         value.forEach((element) {
-          log("classifyImage", "$element");
+          _outputs.add(Result(
+              element['confidence'], element['index'], element['label']));
+
+          _ColorAnimationController.animateTo(element['confidence'],
+              curve: Curves.bounceIn, duration: Duration(milliseconds: 500));
+
+          log("classifyImage",
+              "${element['confidence']} , ${element['index']}, ${element['label']}");
         });
       }
-      _outputs = value;
+
+      _outputs.sort((a, b) => a.confidence.compareTo(b.confidence));
+
+      setState(() {
+        _isDetecting = false;
+      });
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    double width = MediaQuery.of(context).size.width;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
@@ -130,16 +161,56 @@ class _MyHomePageState extends State<MyHomePage> {
             return Stack(
               children: <Widget>[
                 CameraPreview(_camera),
-                Center(
-                  child: _outputs != null && _outputs.isNotEmpty
-                      ? Text(
-                          "${_outputs[0]["label"]}",
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontSize: 26.0,
-                          ),
-                        )
-                      : Text("Classification Failed"),
+                Positioned.fill(
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Container(
+                      height: 200.0,
+                      width: width,
+                      color: Colors.white,
+                      child: _outputs != null && _outputs.isNotEmpty
+                          ? ListView.builder(
+                              itemCount: _outputs.length,
+                              shrinkWrap: true,
+                              padding: const EdgeInsets.all(20.0),
+                              itemBuilder: (BuildContext context, int index) {
+                                return Column(
+                                  children: <Widget>[
+                                    Text(
+                                      _outputs[index].label,
+                                      style: TextStyle(
+                                        color: _colorTween.value,
+                                        fontSize: 20.0,
+                                      ),
+                                    ),
+                                    AnimatedBuilder(
+                                        animation: _ColorAnimationController,
+                                        builder: (context, child) =>
+                                            LinearPercentIndicator(
+                                              width: width * 0.88,
+                                              lineHeight: 14.0,
+                                              percent:
+                                                  _outputs[index].confidence,
+                                              progressColor: _colorTween.value,
+                                            )),
+                                    Text(
+                                      "${(_outputs[index].confidence * 100.0).toStringAsFixed(2)} %",
+                                      style: TextStyle(
+                                        color: _colorTween.value,
+                                        fontSize: 16.0,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              })
+                          : Center(
+                              child: Text("Unable to detect color!",
+                                  style: TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 20.0,
+                                  ))),
+                    ),
+                  ),
                 )
               ],
             );
