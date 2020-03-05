@@ -26,6 +26,7 @@ dependencies:
 
   tflite: ^1.0.5
   image_picker: ^0.6.3+4
+  camera: ^0.5.7+4
 
 dev_dependencies:
   flutter_test:
