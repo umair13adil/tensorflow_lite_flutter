@@ -2,6 +2,9 @@
 
 A flutter app to demonstrate usage of tensor flow lite ML.
 
+![App Demo](pictures/image1.gif)
+![Teachable Machine](pictures/image2.gif)
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.
